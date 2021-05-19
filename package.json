@@ -1,15 +1,14 @@
 {
-  "name": "@nems/hl7-to-fhir-mapper",
+  "name": "@nems/hl7v2-object-mapper",
   "version": "0.0.1",
-  "description": "Map HL7 to FHIR Resources",
+  "description": "Map HL7 to JavaScript Object",
   "main": "lib/index.js",
   "scripts": {
-    "start:dev": "./node_modules/.bin/nodemon ./run/index.ts",
     "test": "nyc mocha"
   },
   "repository": {
     "type": "git",
-    "url": "ssh://git@bitbucket.nems.org:7999/fhiru/hl7-to-fhir-mapper.git"
+    "url": "ssh://git@bitbucket.nems.org:7999/fhiru/hl7-object-mapper.git"
   },
   "keywords": [
     "FHIR",
