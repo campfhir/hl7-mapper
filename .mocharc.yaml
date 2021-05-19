@@ -1,0 +1,11 @@
+slow: 800
+app: hl7-parser
+extension:
+  - ts
+spec:
+  - test/**/*.test.ts
+require:
+  - ts-node/register
+ui: bdd
+exit: true
+recursive: true
