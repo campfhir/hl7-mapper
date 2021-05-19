@@ -1,45 +1,46 @@
-import jp from "jsonpath";
-
 type MessageNode = { [segment: string]: string[] };
 type MessageWithFieldNode = {
   [segment: string]: {
-    [field: string]: string | { [repeatedFieldInd: string]: string };
+    [field: string]: string | string[];
   };
 };
-type MessageWithFieldAndComponentNode = {
+export type FieldComponent = {
+  [component: string]:
+    | string
+    | {
+        [sub: string]: string;
+      };
+};
+
+export type MessageWithFieldAndComponentNode = {
   [segment: string]: {
-    [field: string]:
-      | string
-      | {
-          [repeatedFieldInd: string]:
-            | string
-            | {
-                [component: string]:
-                  | string
-                  | string[]
-                  | { [sub: string]: string };
-              };
-        }
-      | { [component: string]: string | string[] | { [sub: string]: string } };
+    [field: string]: string | FieldComponent[] | FieldComponent;
   };
 };
 
 export class HL7v2Message {
-  readonly raw: string;
-  readonly fieldDelimiter: string;
-  readonly componentDelimiter: string;
-  readonly repeatingFieldDelimiter: string;
-  readonly escapeCharacter: string;
-  readonly subComponentDelimiter: string;
+  private readonly fieldDelimiter: string;
+  private readonly componentDelimiter: string;
+  private readonly repeatingFieldDelimiter: string;
+  private readonly escapeCharacter: string;
+  private readonly subComponentDelimiter: string;
+  private readonly MSH_SEGMENT: string;
+  private readonly DATA_SEGMENTS: string[];
 
-  message: MessageWithFieldAndComponentNode;
+  private _message: MessageWithFieldAndComponentNode;
+  private _raw: string;
 
-  readonly MSH_SEGMENT: string;
-  readonly DATA_SEGMENTS: string[];
+  get message() {
+    return this._message;
+  }
+
+  get raw() {
+    return this._raw;
+  }
 
   constructor(raw: string) {
-    this.raw = raw;
-    this.message = {};
+    this._raw = raw;
+    this._message = {};
     let segments = raw.split("\r");
     let MSH_SEGMENT = segments.shift();
     if (!MSH_SEGMENT) throw new Error("MSH Segment is Falsy");
@@ -53,32 +54,43 @@ export class HL7v2Message {
     this.parse();
   }
 
-  get(path: string) {
-    return jp.query(this.message, path);
-  }
-
-  parse() {
+  private parse() {
     const MSH_SEGMENT = this.parseMSH();
     const parsedSegments = this.parseSegments(this.DATA_SEGMENTS);
     //this.segmentsParsed = parsedSegments;
     const parsedRepeatedField = this.parseRepeatingFields(parsedSegments);
     //this.repeatedParsed = parsedRepeatedField;
+
+    const parsedComponents = this.parseComponents(parsedRepeatedField);
     let parsedMessage: MessageWithFieldAndComponentNode = {
       MSH: MSH_SEGMENT["MSH"],
+      ...parsedComponents,
     };
-    const parsedComponents = this.parseComponents(parsedRepeatedField);
-
-    this.message = { ...parsedMessage, ...parsedComponents };
-    return this.message;
+    this._message = parsedMessage;
+    return this._message;
   }
 
   private parseMSH() {
     const segments = this.parseSegments([this.MSH_SEGMENT]);
+
     const parseRepeatedField = this.parseRepeatingFields(segments);
+
     let components = this.parseComponents(parseRepeatedField);
-    // re-write this field because the parsing will be incorrect;
-    components["MSH"][0] = this.MSH_SEGMENT.substring(3, 8);
-    return components;
+    let mshSegment: { MSH: { [field: number]: any } } = { MSH: {} };
+    // re-write keys field because the parsing will be incorrect;
+    for (let [key, field] of Object.entries(components["MSH"])) {
+      let fieldKey = parseInt(key, 10);
+      // the Encoding characters and Field separator don't map correctly with the parsing logic so we will
+      // manually correct those;
+      if (fieldKey < 2) continue;
+      // increment key value by 1 since HL7 fields are 1-based
+      mshSegment.MSH[fieldKey + 1] = field;
+    }
+    // set the first field in MSH to the field delimiter
+    mshSegment.MSH[1] = this.fieldDelimiter;
+    // this contains the escape characters
+    mshSegment.MSH[2] = this.MSH_SEGMENT.substring(4, 8);
+    return mshSegment;
   }
 
   private replaceEscape(str: string): string {
@@ -165,7 +177,7 @@ export class HL7v2Message {
   }
 
   /**
-   *
+   * Parses over messages that have repeating fields and
    * @param messageNode The message node to parse over it's keys
    * @returns
    */
@@ -184,15 +196,8 @@ export class HL7v2Message {
           obj[segment][fieldIndex] = repeatedFields[0];
           continue;
         }
-        let repeatedObject: { [ind: string]: string } = {};
-        for (let repeatInd in repeatedFields) {
-          let index = parseInt(repeatInd, 10) + 1;
-          let fieldValue = repeatedFields[repeatInd];
 
-          repeatedObject[index] = fieldValue;
-        }
-
-        obj[segment][fieldIndex] = repeatedObject;
+        obj[segment][fieldIndex] = repeatedFields;
       }
     }
     return obj;
@@ -202,40 +207,31 @@ export class HL7v2Message {
     fieldNode: MessageWithFieldNode
   ): MessageWithFieldAndComponentNode {
     let componentNode: MessageWithFieldAndComponentNode = {};
-    // iterate through the segments
+    // * iterate through the segments
     segment: for (let [segment, fields] of Object.entries(fieldNode)) {
       this.initializeComponentNodeSegment(componentNode, segment);
-      if (typeof fields === "string") {
-        componentNode[segment] = fields;
-        continue;
-      }
+      // * iterate through the fields
       fields: for (let [outerInd, field] of Object.entries(fields)) {
         if (typeof field !== "string") {
-          repeat: for (let [ind, repeat] of Object.entries(field)) {
+          // * field is an array, which should be a repeated field
+          repeat: for (let [_ind, repeat] of Object.entries(field)) {
             let components = repeat.split(this.componentDelimiter);
+            if (!Array.isArray(componentNode[segment][outerInd]))
+              componentNode[segment][outerInd] = [];
             this.initializeFieldObject(componentNode, segment, outerInd);
             if (components.length <= 1) {
-              if (ind) {
-                // @ts-ignore
-                componentNode[segment][outerInd][ind] = this.replaceEscape(
-                  components[0]
-                );
-                continue;
-              }
-              componentNode[segment][outerInd] = this.replaceEscape(
-                components[0]
-              );
-
+              // There is only 1 item so we create the string and index the property based on the repeated field
+              (
+                componentNode[segment][outerInd] as (FieldComponent | string)[]
+              ).push(this.replaceEscape(components[0]));
               continue;
             }
             let componentObject = this.toComplexComponentObject(components);
 
-            if (ind) {
-              // @ts-ignore
-              componentNode[segment][outerInd][ind] = componentObject;
-              continue;
-            }
-            componentNode[segment][outerInd] = componentObject;
+            (componentNode[segment][outerInd] as FieldComponent[]).push(
+              componentObject
+            );
+
             continue;
           }
           continue fields;
@@ -244,6 +240,7 @@ export class HL7v2Message {
         // field is a string
         let components = field.split(this.componentDelimiter);
         this.initializeFieldObject(componentNode, segment, outerInd);
+
         if (components.length <= 1) {
           componentNode[segment][outerInd] = this.replaceEscape(components[0]);
           continue;
