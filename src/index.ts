@@ -43,7 +43,11 @@ export class HL7v2Message {
     this._message = {};
     let segments = raw.split("\r");
     let MSH_SEGMENT = segments.shift();
-    if (!MSH_SEGMENT) throw new Error("MSH Segment is Falsy");
+    if (!MSH_SEGMENT) throw new Error("MSH Segment is Empty");
+    if (!MSH_SEGMENT.match(/^MSH/))
+      throw new Error(
+        "Invalid MSH Segment - Ensure that the first segment is a MSH Segment"
+      );
     this.MSH_SEGMENT = MSH_SEGMENT;
     this.DATA_SEGMENTS = segments;
     this.fieldDelimiter = MSH_SEGMENT[3];
@@ -116,7 +120,7 @@ export class HL7v2Message {
         // remove any line feed
         .map((v) => v.replace(/\n/, ""));
       let header = fields.shift();
-      if (!header) throw new Error("No Header");
+      if (!header) throw new Error("Empty Segment Header");
       // some segments can appear multiple times so we append the Sequence Field
       // PV1.1 when parsing into a JSON object
       switch (header) {
@@ -146,10 +150,13 @@ export class HL7v2Message {
         case "RQD":
         case "TXA":
         case "UB1":
-        case "UB2":
+        case "UB2": {
+          let seq: string = fields[0];
+          if (seq === "" || seq === undefined || seq === null) seq = "1";
           // set based on sequence field or if omitted set to 1;
-          header = `${header}.${fields[0] ?? "1"}`;
+          header = `${header}.${seq}`;
           break;
+        }
         default:
           break;
       }
@@ -203,13 +210,13 @@ export class HL7v2Message {
     return obj;
   }
 
-  parseComponents(
+  private parseComponents(
     fieldNode: MessageWithFieldNode
   ): MessageWithFieldAndComponentNode {
     let componentNode: MessageWithFieldAndComponentNode = {};
     // * iterate through the segments
     segment: for (let [segment, fields] of Object.entries(fieldNode)) {
-      this.initializeComponentNodeSegment(componentNode, segment);
+      componentNode[segment] = {};
       // * iterate through the fields
       fields: for (let [outerInd, field] of Object.entries(fields)) {
         if (typeof field !== "string") {
@@ -282,14 +289,5 @@ export class HL7v2Message {
       }
     }
     return componentObject;
-  }
-
-  private initializeComponentNodeSegment(
-    componentNode: MessageWithFieldAndComponentNode,
-    segment: string
-  ) {
-    if (!componentNode[segment]) {
-      componentNode[segment] = {};
-    }
   }
 }
