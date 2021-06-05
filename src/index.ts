@@ -99,11 +99,11 @@ export class HL7v2Message {
 
   private replaceEscape(str: string): string {
     return str
-      .replace("\\F", "|")
-      .replace("\\R", "~")
-      .replace("\\S", "^")
-      .replace("\\T", "&")
-      .replace("\\E", "\\");
+      .replace(`${this.escapeCharacter}F`, "|")
+      .replace(`${this.escapeCharacter}R`, "~")
+      .replace(`${this.escapeCharacter}S`, "^")
+      .replace(`${this.escapeCharacter}T`, "&")
+      .replace(`${this.escapeCharacter}E`, "\\");
   }
 
   /**
