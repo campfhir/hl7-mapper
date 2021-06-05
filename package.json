@@ -1,6 +1,6 @@
 {
   "name": "@nems/hl7v2-object-mapper",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Map HL7 to JavaScript Object",
   "main": "lib/index.js",
   "scripts": {
